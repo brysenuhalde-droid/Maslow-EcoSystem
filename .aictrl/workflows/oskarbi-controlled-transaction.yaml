@@ -1,0 +1,183 @@
+schemaVersion: aictrl/workflow/v2
+name: oskarbi-controlled-transaction
+label: OSKARBI Controlled Transaction
+description: >
+  Prototype governed repository transaction. It preserves stable identity,
+  separates approval from execution, and requires post-execution verification.
+failureStrategy: fail-fast
+
+parameters:
+  - name: repository
+    type: repository
+    required: true
+  - name: object-id
+    type: string
+    required: true
+  - name: expected-artifact-sha256
+    type: string
+    required: true
+  - name: requested-change
+    type: text
+    required: true
+  - name: authority-scope
+    type: text
+    required: true
+
+nodes:
+  - id: understand
+    type: task
+    skill: spec-review@1.0.0
+    taskType: general
+    prompt: >
+      Review the requested OSKARBI change as a bounded specification.
+      Retrieve before creating, identify ambiguity, preserve stable identity,
+      distinguish current authority from provenance, and return a structured
+      preflight result. Do not implement.
+    timeoutMinutes: 10
+    parameters:
+      - name: repository
+        type: repository
+        required: true
+      - name: object-id
+        type: string
+        required: true
+      - name: expected-artifact-sha256
+        type: string
+        required: true
+      - name: requested-change
+        type: text
+        required: true
+      - name: authority-scope
+        type: text
+        required: true
+    inputs:
+      repository: { from: input, name: repository }
+      object-id: { from: input, name: object-id }
+      expected-artifact-sha256: { from: input, name: expected-artifact-sha256 }
+      requested-change: { from: input, name: requested-change }
+      authority-scope: { from: input, name: authority-scope }
+    outputs:
+      preflight: json
+      ready: boolean
+
+  - id: approval
+    type: manual
+    when: "nodes['understand'].output.ready == true"
+    checklistItems:
+      - Exact stable object identity confirmed
+      - Expected artifact hash confirmed
+      - Requested change is within explicit authority scope
+      - No protected/current content is being silently superseded
+      - Preflight is ready, and approval is bound to its object, repository, baseline revision, artifact hash, requested change, and authority scope
+
+  - id: execute
+    type: task
+    when: "nodes['understand'].output.ready == true"
+    skill: implement-code-change@1.0.0
+    taskType: general
+    prompt: >
+      Implement only the explicitly approved repository change.
+      Preserve history and provenance. Do not broaden scope.
+      Require the preflight baseline and a receipt bound to the exact approved
+      values from the manual gate; block on missing, stale, or unbound evidence.
+      Return the exact resulting revision and evidence needed for verification.
+    timeoutMinutes: 20
+    parameters:
+      - name: repository
+        type: repository
+        required: true
+      - name: object-id
+        type: string
+        required: true
+      - name: requested-change
+        type: text
+        required: true
+      - name: authority-scope
+        type: text
+        required: true
+      - name: expected-artifact-sha256
+        type: string
+        required: true
+      - name: preflight
+        type: json
+        required: true
+      - name: approval-receipt
+        type: json
+        required: true
+    inputs:
+      repository: { from: input, name: repository }
+      object-id: { from: input, name: object-id }
+      requested-change: { from: input, name: requested-change }
+      authority-scope: { from: input, name: authority-scope }
+      expected-artifact-sha256: { from: input, name: expected-artifact-sha256 }
+      preflight: { from: node, node: understand, extract: "$.preflight" }
+      approval-receipt: { from: node, node: approval }
+    outputs:
+      execution: json
+      revision: string
+
+  - id: verify
+    type: task
+    skill: spec-review@1.0.0
+    taskType: general
+    prompt: >
+      Verify the resulting repository state against the requested OSKARBI
+      change, object identity, authority scope, and expected evidence.
+      Check the exact preflight, manual approval receipt, expected hash,
+      executed revision, and execution evidence. Fail closed on mismatch.
+      Do not make additional changes.
+    timeoutMinutes: 10
+    parameters:
+      - name: repository
+        type: repository
+        required: true
+      - name: object-id
+        type: string
+        required: true
+      - name: requested-change
+        type: text
+        required: true
+      - name: authority-scope
+        type: text
+        required: true
+      - name: expected-artifact-sha256
+        type: string
+        required: true
+      - name: preflight
+        type: json
+        required: true
+      - name: approval-receipt
+        type: json
+        required: true
+      - name: execution
+        type: json
+        required: true
+      - name: revision
+        type: string
+        required: true
+    inputs:
+      repository: { from: input, name: repository }
+      object-id: { from: input, name: object-id }
+      requested-change: { from: input, name: requested-change }
+      authority-scope: { from: input, name: authority-scope }
+      expected-artifact-sha256: { from: input, name: expected-artifact-sha256 }
+      preflight: { from: node, node: understand, extract: "$.preflight" }
+      approval-receipt: { from: node, node: approval }
+      execution: { from: node, node: execute, extract: "$.execution" }
+      revision: { from: node, node: execute, extract: "$.revision" }
+    outputs:
+      verification: json
+      verified: boolean
+
+  - id: final-signoff
+    type: manual
+    checklistItems:
+      - Verification evidence reviewed
+      - Result is EXECUTED + VERIFIED, NEEDS CLARITY, or NOT EXECUTED / BLOCKED
+      - Return/repair state is explicitly recorded
+
+edges:
+  - { from: understand, to: approval }
+  - { from: approval, to: execute }
+  - { from: execute, to: verify }
+  - { from: verify, to: final-signoff }
