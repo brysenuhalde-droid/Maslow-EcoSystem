@@ -1,0 +1,96 @@
+schemaVersion: aictrl/workflow/v2
+name: oskarbi-approval-receipt-diagnostic
+label: OSKARBI Approval Receipt Diagnostic
+description: >
+  Inspect the v2 manual gate artifact against a read-only preflight. This
+  diagnostic cannot change repository content and does not authorize the
+  controlled transaction workflow.
+failureStrategy: fail-fast
+
+parameters:
+  - name: repository
+    type: repository
+    required: true
+  - name: object-id
+    type: string
+    required: true
+  - name: expected-artifact-sha256
+    type: string
+    required: true
+  - name: requested-change
+    type: text
+    required: true
+  - name: authority-scope
+    type: text
+    required: true
+
+nodes:
+  - id: preflight
+    type: task
+    skill: spec-review@1.0.0
+    taskType: general
+    prompt: >
+      Perform a read-only preflight for the supplied object and proposal.
+      Report the exact baseline revision, expected hash, authority evidence,
+      and blockers. Do not write or infer authorization from this diagnostic.
+    timeoutMinutes: 10
+    parameters:
+      - { name: repository, type: repository, required: true }
+      - { name: object-id, type: string, required: true }
+      - { name: expected-artifact-sha256, type: string, required: true }
+      - { name: requested-change, type: text, required: true }
+      - { name: authority-scope, type: text, required: true }
+    inputs:
+      repository: { from: input, name: repository }
+      object-id: { from: input, name: object-id }
+      expected-artifact-sha256: { from: input, name: expected-artifact-sha256 }
+      requested-change: { from: input, name: requested-change }
+      authority-scope: { from: input, name: authority-scope }
+    outputs:
+      preflight: json
+      ready: boolean
+
+  - id: diagnostic-gate
+    type: manual
+    checklistItems:
+      - This decision authorizes inspection of the receipt only; no repository write
+      - Review the preflight object, repository, baseline revision, expected hash, proposed change, authority scope, and blockers
+      - Record the exact values reviewed in the decision note if the platform permits it; do not assume the platform binds the note to those values
+
+  - id: receipt-check
+    type: task
+    skill: spec-review@1.0.0
+    taskType: general
+    prompt: >
+      Read-only verification diagnostic: inspect the full artifact passed from
+      diagnostic-gate. Compare any approver, decision, revision, object ID,
+      repository, expected hash, proposed change, and authority scope fields
+      with the preflight and inputs. Report observed keys, missing fields,
+      mismatches, and whether the receipt binds the exact values. There is no
+      execution revision or execution evidence in this diagnostic, so return
+      verified: false; do not claim that any repository change was verified.
+      Do not write, approve another gate, publish, or run another workflow.
+    timeoutMinutes: 10
+    parameters:
+      - { name: repository, type: repository, required: true }
+      - { name: object-id, type: string, required: true }
+      - { name: expected-artifact-sha256, type: string, required: true }
+      - { name: requested-change, type: text, required: true }
+      - { name: authority-scope, type: text, required: true }
+      - { name: preflight, type: json, required: true }
+      - { name: approval-receipt, type: json, required: true }
+    inputs:
+      repository: { from: input, name: repository }
+      object-id: { from: input, name: object-id }
+      expected-artifact-sha256: { from: input, name: expected-artifact-sha256 }
+      requested-change: { from: input, name: requested-change }
+      authority-scope: { from: input, name: authority-scope }
+      preflight: { from: node, node: preflight, extract: "$.preflight" }
+      approval-receipt: { from: node, node: diagnostic-gate }
+    outputs:
+      verification: json
+      verified: boolean
+
+edges:
+  - { from: preflight, to: diagnostic-gate }
+  - { from: diagnostic-gate, to: receipt-check }
