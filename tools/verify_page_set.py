@@ -222,6 +222,11 @@ def verify_page_set(manifest_path: Path, root_path: Path, expected_count: int) -
         assert candidate_path is not None
         assert isinstance(sha256_value, str)
 
+        preliminary_resolved_path = candidate_path.resolve(strict=False)
+        if not preliminary_resolved_path.is_relative_to(root_resolved):
+            byte_page["errors"].append("resolved file is outside the root directory")
+            continue
+
         try:
             resolved_path = candidate_path.resolve(strict=True)
         except FileNotFoundError:
