@@ -365,6 +365,39 @@ class VerifyPageSetCliTests(unittest.TestCase):
             self.assertFalse(output["bytes"]["verified"])
             self.assertIn("symlink target is missing", output["bytes"]["pages"][0]["errors"])
 
+    def test_broken_symlink_to_missing_outside_target_is_rejected_as_escape(self) -> None:
+        if not hasattr(os, "symlink"):
+            self.skipTest("symlink creation is unavailable on this platform")
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            root = temp_path / "root"
+            root.mkdir()
+
+            missing_outside = temp_path / "outside" / "missing.bin"
+            missing_outside.parent.mkdir()
+
+            try:
+                os.symlink(missing_outside, root / "escape.bin")
+            except (NotImplementedError, OSError) as exc:
+                self.skipTest(f"symlink creation is unavailable: {exc}")
+
+            manifest_path = temp_path / "manifest.json"
+            self.write_manifest(
+                manifest_path,
+                [self.page("P001", "escape.bin", b"synthetic")],
+            )
+
+            result = self.run_cli(manifest_path, root, expected_count=1)
+
+            self.assertNotEqual(result.returncode, 0)
+            output = json.loads(result.stdout)
+            self.assertFalse(output["structure"]["verified"])
+            self.assertIn(
+                "relative_path resolves outside the root directory",
+                output["structure"]["pages"][0]["errors"],
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

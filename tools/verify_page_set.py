@@ -13,6 +13,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import sys
 from pathlib import Path, PurePath, PurePosixPath, PureWindowsPath
 from typing import Any
@@ -46,21 +47,33 @@ def _sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
-def _has_broken_symlink(root_path: Path, candidate_path: Path) -> bool:
+def _inspect_candidate_path(root_path: Path, candidate_path: Path) -> dict[str, Any]:
     try:
         relative_parts = candidate_path.relative_to(root_path).parts
     except ValueError:
-        return False
+        return {"escapes_root": True, "broken_symlink": False}
 
     current_path = root_path
     for part in relative_parts:
         current_path = current_path / part
+        if not current_path.resolve(strict=False).is_relative_to(root_path):
+            return {"escapes_root": True, "broken_symlink": False}
         if current_path.is_symlink():
-            try:
-                current_path.resolve(strict=True)
-            except FileNotFoundError:
-                return True
-    return False
+            link_target = Path(os.readlink(current_path))
+            if not link_target.is_absolute():
+                link_target = current_path.parent / link_target
+            resolved_target = link_target.resolve(strict=False)
+            if not resolved_target.is_relative_to(root_path):
+                return {"escapes_root": True, "broken_symlink": False}
+            if not link_target.exists():
+                return {"escapes_root": False, "broken_symlink": True}
+            current_path = resolved_target
+            continue
+
+        if not current_path.exists():
+            return {"escapes_root": False, "broken_symlink": False}
+
+    return {"escapes_root": False, "broken_symlink": False}
 
 
 def verify_page_set(manifest_path: Path, root_path: Path, expected_count: int) -> dict[str, Any]:
@@ -203,8 +216,8 @@ def verify_page_set(manifest_path: Path, root_path: Path, expected_count: int) -
                 seen_paths[normalized_path] = index
 
             candidate_path = root_resolved / PurePosixPath(relative_path)
-            resolved_candidate = candidate_path.resolve(strict=False)
-            if not resolved_candidate.is_relative_to(root_resolved):
+            path_inspection = _inspect_candidate_path(root_resolved, candidate_path)
+            if path_inspection["escapes_root"]:
                 page_record["errors"].append("relative_path resolves outside the root directory")
 
         if isinstance(sha256_value, str):
@@ -222,18 +235,18 @@ def verify_page_set(manifest_path: Path, root_path: Path, expected_count: int) -
         assert candidate_path is not None
         assert isinstance(sha256_value, str)
 
-        preliminary_resolved_path = candidate_path.resolve(strict=False)
-        if not preliminary_resolved_path.is_relative_to(root_resolved):
+        path_inspection = _inspect_candidate_path(root_resolved, candidate_path)
+        if path_inspection["escapes_root"]:
             byte_page["errors"].append("resolved file is outside the root directory")
+            continue
+        if path_inspection["broken_symlink"]:
+            byte_page["errors"].append("symlink target is missing")
             continue
 
         try:
             resolved_path = candidate_path.resolve(strict=True)
         except FileNotFoundError:
-            if _has_broken_symlink(root_resolved, candidate_path):
-                byte_page["errors"].append("symlink target is missing")
-            else:
-                byte_page["errors"].append("file is missing")
+            byte_page["errors"].append("file is missing")
             continue
         except OSError as exc:
             byte_page["errors"].append(f"file is not readable: {exc}")
