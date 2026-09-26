@@ -121,6 +121,37 @@ class VerifyPageSetCliTests(unittest.TestCase):
             self.assertFalse(output["bytes"]["pages"][0]["verified"])
             self.assertIn("file is missing", output["bytes"]["pages"][0]["errors"])
 
+    def test_unreadable_file_reports_error(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            root = temp_path / "root"
+            root.mkdir()
+
+            file_path = root / "pages" / "p001.bin"
+            file_path.parent.mkdir(parents=True, exist_ok=True)
+            content = b"synthetic"
+            file_path.write_bytes(content)
+
+            manifest_path = temp_path / "manifest.json"
+            self.write_manifest(manifest_path, [self.page("P001", "pages/p001.bin", content)])
+
+            original_mode = file_path.stat().st_mode
+            os.chmod(file_path, 0)
+            try:
+                result = self.run_cli(manifest_path, root, expected_count=1)
+            finally:
+                os.chmod(file_path, original_mode)
+
+            output = json.loads(result.stdout)
+            if result.returncode == 0:
+                self.skipTest("current platform still allows reading chmod(0) test files")
+
+            self.assertTrue(output["structure"]["verified"])
+            self.assertFalse(output["bytes"]["verified"])
+            self.assertTrue(
+                any(error.startswith("file is not readable:") for error in output["bytes"]["pages"][0]["errors"])
+            )
+
     def test_duplicate_gap_and_order_errors_fail_structure(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_path = Path(temp_dir)

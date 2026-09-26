@@ -247,7 +247,12 @@ def verify_page_set(manifest_path: Path, root_path: Path, expected_count: int) -
             byte_page["errors"].append("path does not reference a regular file")
             continue
 
-        actual_sha256 = _sha256_file(resolved_path)
+        try:
+            actual_sha256 = _sha256_file(resolved_path)
+        except OSError as exc:
+            byte_page["errors"].append(f"file is not readable: {exc}")
+            continue
+
         if actual_sha256 != sha256_value:
             byte_page["errors"].append("sha256 mismatch")
             continue
