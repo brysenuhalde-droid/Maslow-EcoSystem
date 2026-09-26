@@ -56,13 +56,20 @@ def _inspect_candidate_path(root_path: Path, candidate_path: Path) -> dict[str, 
     current_path = root_path
     for part in relative_parts:
         current_path = current_path / part
-        if not current_path.resolve(strict=False).is_relative_to(root_path):
+        try:
+            resolved_current = current_path.resolve(strict=False)
+        except (OSError, RuntimeError):
+            return {"escapes_root": False, "broken_symlink": False, "resolution_error": True}
+        if not resolved_current.is_relative_to(root_path):
             return {"escapes_root": True, "broken_symlink": False}
         if current_path.is_symlink():
             link_target = Path(os.readlink(current_path))
             if not link_target.is_absolute():
                 link_target = current_path.parent / link_target
-            resolved_target = link_target.resolve(strict=False)
+            try:
+                resolved_target = link_target.resolve(strict=False)
+            except (OSError, RuntimeError):
+                return {"escapes_root": False, "broken_symlink": False, "resolution_error": True}
             if not resolved_target.is_relative_to(root_path):
                 return {"escapes_root": True, "broken_symlink": False}
             if not link_target.exists():
@@ -100,7 +107,7 @@ def verify_page_set(manifest_path: Path, root_path: Path, expected_count: int) -
         report["structure"]["errors"].append(f"root path does not exist: {exc}")
         report["bytes"]["errors"].append("byte verification not performed because root path does not exist")
         return report
-    except OSError as exc:
+    except (OSError, RuntimeError) as exc:
         report["structure"]["errors"].append(f"root path is not readable: {exc}")
         report["bytes"]["errors"].append("byte verification not performed because root directory is unavailable")
         return report
@@ -219,6 +226,8 @@ def verify_page_set(manifest_path: Path, root_path: Path, expected_count: int) -
             path_inspection = _inspect_candidate_path(root_resolved, candidate_path)
             if path_inspection["escapes_root"]:
                 page_record["errors"].append("relative_path resolves outside the root directory")
+            if path_inspection.get("resolution_error"):
+                page_record["errors"].append("relative_path cannot be resolved safely")
 
         if isinstance(sha256_value, str):
             if len(sha256_value) != 64 or any(character not in "0123456789abcdef" for character in sha256_value):
@@ -239,6 +248,9 @@ def verify_page_set(manifest_path: Path, root_path: Path, expected_count: int) -
         if path_inspection["escapes_root"]:
             byte_page["errors"].append("resolved file is outside the root directory")
             continue
+        if path_inspection.get("resolution_error"):
+            byte_page["errors"].append("file path cannot be resolved safely")
+            continue
         if path_inspection["broken_symlink"]:
             byte_page["errors"].append("symlink target is missing")
             continue
@@ -247,6 +259,9 @@ def verify_page_set(manifest_path: Path, root_path: Path, expected_count: int) -
             resolved_path = candidate_path.resolve(strict=True)
         except FileNotFoundError:
             byte_page["errors"].append("file is missing")
+            continue
+        except RuntimeError:
+            byte_page["errors"].append("file path cannot be resolved safely")
             continue
         except OSError as exc:
             byte_page["errors"].append(f"file is not readable: {exc}")
