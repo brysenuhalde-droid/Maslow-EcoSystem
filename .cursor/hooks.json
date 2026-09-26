@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "hooks": {
+    "beforeReadFile": [
+      {
+        "command": "AICTRL_API_KEY=YOUR_API_KEY AICTRL_TELEMETRY_URL=https://aictrl.dev/api/telemetry .cursor/hooks/skill-telemetry.sh",
+        "timeout": 5
+      }
+    ]
+  }
+}

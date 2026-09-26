@@ -1,0 +1,16 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Skill|Read",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "AICTRL_API_KEY=YOUR_API_KEY AICTRL_TELEMETRY_URL=https://aictrl.dev/api/telemetry .claude/hooks/skill-telemetry.sh",
+            "timeout": 5
+          }
+        ]
+      }
+    ]
+  }
+}
