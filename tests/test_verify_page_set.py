@@ -398,6 +398,32 @@ class VerifyPageSetCliTests(unittest.TestCase):
                 output["structure"]["pages"][0]["errors"],
             )
 
+    def test_symlink_loop_reports_json_error(self) -> None:
+        if not hasattr(os, "symlink"):
+            self.skipTest("symlink creation is unavailable on this platform")
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir) / "root"
+            root.mkdir()
+            try:
+                os.symlink("loop", root / "loop")
+            except (NotImplementedError, OSError) as exc:
+                self.skipTest(f"symlink creation is unavailable: {exc}")
+
+            manifest_path = Path(temp_dir) / "manifest.json"
+            self.write_manifest(manifest_path, [self.page("P001", "loop", b"synthetic")])
+            result = self.run_cli(manifest_path, root, expected_count=1)
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertEqual(result.stderr, "")
+            output = json.loads(result.stdout)
+            self.assertFalse(output["structure"]["verified"])
+            self.assertFalse(output["bytes"]["verified"])
+            self.assertIn(
+                "relative_path cannot be resolved safely",
+                output["structure"]["pages"][0]["errors"],
+            )
+
 
 if __name__ == "__main__":
     unittest.main()
