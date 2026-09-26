@@ -46,6 +46,23 @@ def _sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
+def _has_broken_symlink(root_path: Path, candidate_path: Path) -> bool:
+    try:
+        relative_parts = candidate_path.relative_to(root_path).parts
+    except ValueError:
+        return False
+
+    current_path = root_path
+    for part in relative_parts:
+        current_path = current_path / part
+        if current_path.is_symlink():
+            try:
+                current_path.resolve(strict=True)
+            except FileNotFoundError:
+                return True
+    return False
+
+
 def verify_page_set(manifest_path: Path, root_path: Path, expected_count: int) -> dict[str, Any]:
     report: dict[str, Any] = {
         "structure": {
@@ -66,8 +83,12 @@ def verify_page_set(manifest_path: Path, root_path: Path, expected_count: int) -
 
     try:
         root_resolved = root_path.resolve(strict=True)
+    except FileNotFoundError as exc:
+        report["structure"]["errors"].append(f"root path does not exist: {exc}")
+        report["bytes"]["errors"].append("byte verification not performed because root path does not exist")
+        return report
     except OSError as exc:
-        report["structure"]["errors"].append(f"root directory is not readable: {exc}")
+        report["structure"]["errors"].append(f"root path is not readable: {exc}")
         report["bytes"]["errors"].append("byte verification not performed because root directory is unavailable")
         return report
 
@@ -204,7 +225,10 @@ def verify_page_set(manifest_path: Path, root_path: Path, expected_count: int) -
         try:
             resolved_path = candidate_path.resolve(strict=True)
         except FileNotFoundError:
-            byte_page["errors"].append("file is missing")
+            if _has_broken_symlink(root_resolved, candidate_path):
+                byte_page["errors"].append("symlink target is missing")
+            else:
+                byte_page["errors"].append("file is missing")
             continue
         except OSError as exc:
             byte_page["errors"].append(f"file is not readable: {exc}")

@@ -251,6 +251,24 @@ class VerifyPageSetCliTests(unittest.TestCase):
                 output["bytes"]["errors"],
             )
 
+    def test_missing_root_path_reports_root_error(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            manifest_path = temp_path / "manifest.json"
+            self.write_manifest(manifest_path, [])
+
+            result = self.run_cli(manifest_path, temp_path / "missing-root", expected_count=0)
+
+            self.assertNotEqual(result.returncode, 0)
+            output = json.loads(result.stdout)
+            self.assertFalse(output["structure"]["verified"])
+            self.assertFalse(output["bytes"]["verified"])
+            self.assertTrue(any("root path does not exist" in error for error in output["structure"]["errors"]))
+            self.assertIn(
+                "byte verification not performed because root path does not exist",
+                output["bytes"]["errors"],
+            )
+
     def test_symlink_escaping_root_is_rejected(self) -> None:
         if not hasattr(os, "symlink"):
             self.skipTest("symlink creation is unavailable on this platform")
@@ -287,6 +305,34 @@ class VerifyPageSetCliTests(unittest.TestCase):
                 "relative_path resolves outside the root directory",
                 output["structure"]["pages"][0]["errors"],
             )
+
+    def test_broken_symlink_reports_missing_target(self) -> None:
+        if not hasattr(os, "symlink"):
+            self.skipTest("symlink creation is unavailable on this platform")
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            root = temp_path / "root"
+            root.mkdir()
+
+            try:
+                os.symlink(root / "missing-target.bin", root / "broken.bin")
+            except (NotImplementedError, OSError) as exc:
+                self.skipTest(f"symlink creation is unavailable: {exc}")
+
+            manifest_path = temp_path / "manifest.json"
+            self.write_manifest(
+                manifest_path,
+                [self.page("P001", "broken.bin", b"synthetic")],
+            )
+
+            result = self.run_cli(manifest_path, root, expected_count=1)
+
+            self.assertNotEqual(result.returncode, 0)
+            output = json.loads(result.stdout)
+            self.assertTrue(output["structure"]["verified"])
+            self.assertFalse(output["bytes"]["verified"])
+            self.assertIn("symlink target is missing", output["bytes"]["pages"][0]["errors"])
 
 
 if __name__ == "__main__":
