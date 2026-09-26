@@ -71,6 +71,11 @@ def verify_page_set(manifest_path: Path, root_path: Path, expected_count: int) -
         report["bytes"]["errors"].append("byte verification not performed because root directory is unavailable")
         return report
 
+    if not root_resolved.is_dir():
+        report["structure"]["errors"].append("root path must reference a directory")
+        report["bytes"]["errors"].append("byte verification not performed because root path is not a directory")
+        return report
+
     try:
         with manifest_path.open("r", encoding="utf-8") as handle:
             manifest = json.load(handle)

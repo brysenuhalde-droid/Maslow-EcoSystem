@@ -230,6 +230,27 @@ class VerifyPageSetCliTests(unittest.TestCase):
             self.assertFalse(output["structure"]["verified"])
             self.assertIn("expected_count mismatch: expected 2, found 1", output["structure"]["errors"])
 
+    def test_root_must_be_directory(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            root_file = temp_path / "not-a-directory"
+            root_file.write_text("synthetic", encoding="utf-8")
+
+            manifest_path = temp_path / "manifest.json"
+            self.write_manifest(manifest_path, [])
+
+            result = self.run_cli(manifest_path, root_file, expected_count=0)
+
+            self.assertNotEqual(result.returncode, 0)
+            output = json.loads(result.stdout)
+            self.assertFalse(output["structure"]["verified"])
+            self.assertFalse(output["bytes"]["verified"])
+            self.assertIn("root path must reference a directory", output["structure"]["errors"])
+            self.assertIn(
+                "byte verification not performed because root path is not a directory",
+                output["bytes"]["errors"],
+            )
+
     def test_symlink_escaping_root_is_rejected(self) -> None:
         if not hasattr(os, "symlink"):
             self.skipTest("symlink creation is unavailable on this platform")

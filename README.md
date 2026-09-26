@@ -41,7 +41,7 @@ for index in range(1, 4):
 (root / "manifest.json").write_text(json.dumps({"pages": pages}, indent=2), encoding="utf-8")
 PY
 
-cd /home/runner/work/Maslow-EcoSystem/Maslow-EcoSystem
+# from the repository checkout root
 python tools/verify_page_set.py \
   --manifest /tmp/page-set-example/manifest.json \
   --root /tmp/page-set-example \
