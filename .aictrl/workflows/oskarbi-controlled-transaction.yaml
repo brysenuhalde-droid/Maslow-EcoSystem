@@ -62,6 +62,7 @@ nodes:
 
   - id: approval
     type: manual
+    when: "nodes['understand'].output.ready == true"
     checklistItems:
       - Exact stable object identity confirmed
       - Expected artifact hash confirmed
@@ -71,6 +72,7 @@ nodes:
 
   - id: execute
     type: task
+    when: "nodes['understand'].output.ready == true"
     skill: implement-code-change@1.0.0
     taskType: general
     prompt: >
